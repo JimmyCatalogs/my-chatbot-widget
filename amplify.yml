@@ -1,0 +1,28 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - npm ci
+    build:
+      commands:
+        - npm run build
+  artifacts:
+    baseDirectory: dist
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
+backend:
+  phases:
+    build:
+      commands:
+        - cd amplify/backend/function/chatbotapiLambda/src && npm ci
+  artifacts:
+    baseDirectory: amplify/backend/function/chatbotapiLambda/src
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - amplify/backend/function/chatbotapiLambda/src/node_modules/**/*

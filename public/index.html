@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Widget Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+        h1 {
+            color: #1f2937;
+        }
+        @keyframes spin {
+            from { transform: translateY(-50%) rotate(0deg); }
+            to { transform: translateY(-50%) rotate(360deg); }
+        }
+        .responses-list {
+            list-style: none;
+            padding: 0;
+        }
+        .responses-list li {
+            padding: 16px;
+            margin: 12px 0;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        .responses-list li:not(:last-child) {
+            border-bottom: 1px solid #e5e7eb;
+        }
+        #debug {
+            margin-top: 40px;
+            padding: 20px;
+            background: #1f2937;
+            color: #e5e7eb;
+            border-radius: 8px;
+        }
+        #debug-output {
+            margin: 0;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
+        .step-note {
+            font-size: 14px;
+            color: #6b7280;
+            margin-top: 4px;
+            font-style: italic;
+        }
+        .disabled-note {
+            display: none;
+            color: #ef4444;
+            font-size: 14px;
+            margin-top: 4px;
+        }
+        .training-step button[disabled] + .disabled-note {
+            display: block;
+        }
+        .loading-indicator {
+            display: none;
+            color: #3b82f6;
+            font-size: 14px;
+            margin: 8px 0;
+            align-items: center;
+            gap: 8px;
+        }
+        .loading-indicator::before {
+            content: '';
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #3b82f6;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        .loading-indicator.visible {
+            display: flex;
+        }
+        .error-message {
+            color: #ef4444;
+            background: #fef2f2;
+            border: 1px solid #fee2e2;
+            border-radius: 4px;
+            padding: 12px;
+            margin: 8px 0;
+        }
+        .error-message pre {
+            margin: 8px 0 0;
+            padding: 8px;
+            background: #fff;
+            border-radius: 4px;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+        .training-form {
+            margin: 16px 0;
+        }
+        .training-form input,
+        .training-form textarea {
+            display: block;
+            width: 100%;
+            margin: 8px 0;
+            padding: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+        }
+        .training-form button {
+            padding: 8px 16px;
+            background: #3b82f6;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .training-form button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .questions-list {
+            list-style: none;
+            padding: 0;
+        }
+        .questions-list li {
+            padding: 12px;
+            margin: 8px 0;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .questions-list li:hover {
+            background: #f3f4f6;
+        }
+        .questions-list li.loading {
+            opacity: 0.5;
+            cursor: wait;
+        }
+        .current-pdf {
+            margin-top: 8px;
+            font-size: 14px;
+            color: #6b7280;
+        }
+        .pdf-form {
+            margin: 16px 0;
+        }
+        .pdf-form input {
+            width: 400px;
+            padding: 8px;
+            margin-right: 8px;
+            border: 1px solid #e5e7eb;
+            border-radius: 4px;
+        }
+        .test-section {
+            margin: 40px 0;
+            padding: 20px;
+            background: #f9fafb;
+            border-radius: 8px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chatbot Widget Test Page</h1>
+    
+    <!-- Standard Widget -->
+    <div class="test-section">
+        <h2>Standard Chat</h2>
+        <p>This is the standard chatbot without document context. It will appear in the default bottom-right position.</p>
+        <chatbot-widget 
+            id="standard-widget"
+            profile-id="default-profile"
+            agent-id="claude-default"
+            primary-color="#3B82F6"
+            bottom="20px"
+            right="20px"
+        ></chatbot-widget>
+    </div>
+    
+    <!-- Document-Enabled Widget -->
+    <div class="test-section">
+        <h2>Document-Enabled Chat</h2>
+        <p>This chatbot includes document context. Enter a PDF URL below to update the document context.</p>
+        
+        <form class="pdf-form" id="pdfForm">
+            <input 
+                type="url" 
+                id="pdfUrl" 
+                placeholder="Enter S3 PDF URL (e.g., https://bucket-name.s3.region.amazonaws.com/path/to/file.pdf)"
+                required
+            >
+            <button type="submit">Update PDF</button>
+            <div class="current-pdf">
+                Current PDF: <span id="currentPdf">None</span>
+            </div>
+        </form>
+
+        <chatbot-widget 
+            id="doc-widget"
+            profile-id="default-profile"
+            agent-id="claude-default"
+            primary-color="#4F46E5"
+            bottom="100px"
+            right="20px"
+            document-url="https://ai-testing-jw.s3.us-east-1.amazonaws.com/docs/Implementing_the_Valuation_First_Methodology_with_Catipult_-F_.pdf"
+        ></chatbot-widget>
+    </div>
+
+    <!-- Training Interface -->
+    <div class="test-section">
+        <h2>Training Interface</h2>
+        <p>Test the training API functionality for generating custom responses.</p>
+
+        <div class="training-step">
+            <h3>1. Create Training Context</h3>
+            <p class="step-note">First, create a training context to organize your documents and questions.</p>
+            <form id="contextForm" class="training-form">
+                <input type="text" id="businessType" placeholder="Business Type (e.g., Real Estate Agency)" required>
+                <input type="text" id="industry" placeholder="Industry (e.g., Real Estate)" required>
+                <input type="text" id="targetUser" placeholder="Target User (e.g., Real Estate Agents)" required>
+                <textarea id="specialInstructions" placeholder="Special Instructions (e.g., Focus on property valuation topics)" required></textarea>
+                <input type="number" id="numQuestions" placeholder="Number of Questions (default: 25)" min="1" max="50">
+                <button type="submit">Create Context</button>
+            </form>
+            <div id="contextOutput" class="training-output"></div>
+        </div>
+
+        <div class="training-step">
+            <h3>2. Upload Training Documents</h3>
+            <p class="step-note">After creating a context, upload your training documents.</p>
+            <form id="documentsForm" class="training-form">
+                <input type="file" multiple accept=".pdf,.docx,.txt" class="file-upload" required>
+                <button type="submit" disabled>Upload Documents</button>
+                <div class="disabled-note">Please create a training context first</div>
+            </form>
+            <div id="documentsOutput" class="training-output"></div>
+        </div>
+
+        <div class="training-step">
+            <h3>3. Generate Questions</h3>
+            <p class="step-note">Once documents are uploaded, generate questions based on their content.</p>
+            <div class="training-form">
+                <button id="generateQuestions" disabled>Generate Questions</button>
+                <div class="disabled-note">Please upload training documents first</div>
+                <div id="questionsLoading" class="loading-indicator">Generating questions...</div>
+            </div>
+            <ul id="questionsList" class="questions-list"></ul>
+        </div>
+
+        <div class="training-step">
+            <h3>4. Generate Responses</h3>
+            <p class="step-note">Click any question above to generate possible responses.</p>
+            <div id="responsesOutput" class="training-output">
+                <p>Select a question above to generate responses</p>
+            </div>
+        </div>
+
+        <div class="training-step">
+            <h3>5. Save Training Set</h3>
+            <p class="step-note">Finally, save your training set when you're satisfied with the questions.</p>
+            <div class="training-form">
+                <button id="saveTraining" disabled>Save Training Data</button>
+                <div class="disabled-note">Please generate questions first</div>
+            </div>
+            <div id="saveOutput" class="training-output"></div>
+        </div>
+    </div>
+    
+    <!-- Debug Console -->
+    <div id="debug">
+        <h3>Debug Console</h3>
+        <pre id="debug-output"></pre>
+    </div>
+
+    <script src="https://dev.d14atbjemoqupg.amplifyapp.com/widget.js"></script>
+    <script>
+        const API_URL = 'https://twprrdsgsk.execute-api.us-east-1.amazonaws.com/dev';
+        let currentContextId = null;
+        let generatedQuestions = [];
+
+        // Debug helper
+        function logDebug(message) {
+            const debugOutput = document.getElementById('debug-output');
+            const timestamp = new Date().toLocaleTimeString();
+            debugOutput.innerHTML += `[${timestamp}] ${message}\n`;
+        }
+
+        // Handle PDF form submission
+        document.getElementById('pdfForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const pdfUrl = document.getElementById('pdfUrl').value;
+            const docWidget = document.getElementById('doc-widget');
+            
+            if (docWidget) {
+                docWidget.setAttribute('document-url', pdfUrl);
+                document.getElementById('currentPdf').textContent = pdfUrl;
+                logDebug(`Updated document URL to: ${pdfUrl}`);
+            }
+        });
+
+        // Create Training Context
+        document.getElementById('contextForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = {
+                businessType: document.getElementById('businessType').value,
+                industry: document.getElementById('industry').value,
+                targetUser: document.getElementById('targetUser').value,
+                specialInstructions: document.getElementById('specialInstructions').value,
+                numQuestions: document.getElementById('numQuestions').value || 25
+            };
+
+            try {
+                const response = await fetch(`${API_URL}/api/training/context`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(formData)
+                });
+                const data = await response.json();
+                currentContextId = data.contextId;
+                document.getElementById('contextOutput').textContent = `Context created with ID: ${currentContextId}`;
+                document.querySelector('#documentsForm button').disabled = false;
+                logDebug(`Created training context: ${currentContextId}`);
+            } catch (error) {
+                logDebug(`Error creating context: ${error.message}`);
+            }
+        });
+
+        // Upload Documents
+        document.getElementById('documentsForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            const formData = new FormData();
+            const fileInput = this.querySelector('input[type="file"]');
+            
+            for (const file of fileInput.files) {
+                formData.append('files', file);
+            }
+
+            try {
+                const response = await fetch(`${API_URL}/api/training/documents/${currentContextId}`, {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                document.getElementById('documentsOutput').textContent = 
+                    `Processed ${data.documentCount} documents`;
+                document.getElementById('generateQuestions').disabled = false;
+                logDebug(`Uploaded documents: ${data.documentCount} processed`);
+            } catch (error) {
+                logDebug(`Error uploading documents: ${error.message}`);
+            }
+        });
+
+        // Generate Questions
+        document.getElementById('generateQuestions').addEventListener('click', async function() {
+            const loadingIndicator = document.getElementById('questionsLoading');
+            loadingIndicator.classList.add('visible');
+            
+            try {
+                const response = await fetch(`${API_URL}/api/training/questions/${currentContextId}`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                generatedQuestions = data.questions;
+                
+                const questionsList = document.getElementById('questionsList');
+                questionsList.innerHTML = generatedQuestions.map((q, i) => 
+                    `<li data-index="${i}" onclick="generateResponses(this, ${i})">${q}</li>`
+                ).join('');
+                
+                document.getElementById('saveTraining').disabled = false;
+                logDebug(`Generated ${generatedQuestions.length} questions`);
+            } catch (error) {
+                logDebug(`Error generating questions: ${error.message}`);
+            } finally {
+                loadingIndicator.classList.remove('visible');
+            }
+        });
+
+        // Generate Responses
+        async function generateResponses(element, index) {
+            if (element.classList.contains('loading')) return;
+            
+            const question = generatedQuestions[index];
+            element.classList.add('loading');
+            document.getElementById('responsesOutput').innerHTML = '<p>Generating responses...</p>';
+            
+            try {
+                const response = await fetch(`${API_URL}/api/training/responses/${currentContextId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question })
+                });
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || data.details || 'Failed to generate responses');
+                }
+                
+                if (!data.responses || !Array.isArray(data.responses)) {
+                    throw new Error('Invalid response format');
+                }
+
+                const responsesOutput = document.getElementById('responsesOutput');
+                if (data.responses.length === 0) {
+                    responsesOutput.innerHTML = `
+                        <div class="error-message">
+                            No responses were generated. Please try again.
+                        </div>
+                    `;
+                } else {
+                    responsesOutput.innerHTML = `
+                        <h4>Responses for: "${question}"</h4>
+                        <ul class="responses-list">
+                            ${data.responses.map((r, i) => `<li>${i + 1}. ${r}</li>`).join('')}
+                        </ul>
+                    `;
+                }
+                logDebug(`Generated responses for question: ${question.substring(0, 50)}...`);
+            } catch (error) {
+                document.getElementById('responsesOutput').innerHTML = `
+                    <div class="error-message">
+                        Error generating responses: ${error.message}
+                        ${error.stack ? `<pre>${error.stack}</pre>` : ''}
+                    </div>
+                `;
+                logDebug(`Error generating responses: ${error.message}`);
+            } finally {
+                element.classList.remove('loading');
+            }
+        }
+
+        // Save Training Data
+        document.getElementById('saveTraining').addEventListener('click', async function() {
+            try {
+                const response = await fetch(`${API_URL}/api/training/save/${currentContextId}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ questions: generatedQuestions })
+                });
+                const data = await response.json();
+                
+                if (data.success) {
+                    document.getElementById('saveOutput').textContent = 'Training data saved successfully';
+                    // Reset form states
+                    document.querySelector('#documentsForm button').disabled = true;
+                    document.getElementById('generateQuestions').disabled = true;
+                    document.getElementById('saveTraining').disabled = true;
+                    currentContextId = null;
+                    generatedQuestions = [];
+                    logDebug('Training data saved successfully');
+                }
+            } catch (error) {
+                logDebug(`Error saving training data: ${error.message}`);
+            }
+        });
+
+        // Test widget loading
+        window.addEventListener('load', () => {
+            const standardWidget = document.getElementById('standard-widget');
+            const docWidget = document.getElementById('doc-widget');
+
+            if (standardWidget) {
+                logDebug('✅ Standard widget loaded');
+                logDebug(`   Agent ID: ${standardWidget.getAttribute('agent-id')}`);
+                logDebug(`   Document URL: ${standardWidget.getAttribute('document-url') || 'none'}`);
+                logDebug(`   Position: bottom=${standardWidget.getAttribute('bottom')}, right=${standardWidget.getAttribute('right')}`);
+            } else {
+                logDebug('❌ Standard widget failed to load');
+            }
+
+            if (docWidget) {
+                logDebug('✅ Document-enabled widget loaded');
+                logDebug(`   Agent ID: ${docWidget.getAttribute('agent-id')}`);
+                logDebug(`   Document URL: ${docWidget.getAttribute('document-url')}`);
+                logDebug(`   Position: bottom=${docWidget.getAttribute('bottom')}, right=${docWidget.getAttribute('right')}`);
+
+                // Set initial PDF URL in the display
+                const initialPdfUrl = docWidget.getAttribute('document-url');
+                if (initialPdfUrl) {
+                    document.getElementById('currentPdf').textContent = initialPdfUrl;
+                }
+            } else {
+                logDebug('❌ Document-enabled widget failed to load');
+            }
+        });
+    </script>
+</body>
+</html>

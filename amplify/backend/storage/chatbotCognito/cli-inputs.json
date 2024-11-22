@@ -1,0 +1,14 @@
+{
+  "resourceName": "chatbotCognito",
+  "policyUUID": "97b21011",
+  "bucketName": "chabot-bucket",
+  "storageAccess": "authAndGuest",
+  "guestAccess": [
+    "READ"
+  ],
+  "authAccess": [
+    "CREATE_AND_UPDATE"
+  ],
+  "triggerFunction": "S3Trigger4cf879ad",
+  "groupAccess": {}
+}
