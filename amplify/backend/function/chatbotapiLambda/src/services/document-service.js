@@ -1,168 +1,293 @@
 const { dynamoClient } = require('../config/aws-clients');
-const { downloadPDFFromS3 } = require('./pdf-service');
+const { downloadPDFFromS3, extractTextFromPDF } = require('./pdf-service');
 const { getEmbeddings, generateDocumentSummary } = require('./embedding-service');
-const { cleanText, createChunks, cosineSimilarity } = require('../utils/document-utils');
-const pdfParse = require('pdf-parse');
 
-const CHUNKS_TABLE = process.env.CHUNKS_TABLE || "DocumentChunks";
-const BATCH_SIZE = 5; // Process 5 chunks at a time to avoid timeouts
+const CHUNKS_TABLE = process.env.CHUNKS_TABLE || "chatbot-document-chunks";
+const CHUNK_SIZE = 500;
+const CHUNK_OVERLAP = 50;
+const MAX_CHUNKS_PER_QUERY = 5;
 
-async function processAndStoreDocument(url, contextId = null) {
-  console.log(`Processing document from URL: ${url}`);
-  try {
-    const docId = Buffer.from(url).toString('base64');
+const cleanText = (text) => {
+  if (!text) return '';
+  
+  return text
+    .replace(/[^\S\n]+/g, ' ')
+    .replace(/[^\x20-\x7E\n]/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
+
+const createChunks = (text) => {
+  if (!text || text.length === 0) {
+    console.log('Warning: Empty text provided to createChunks');
+    return [];
+  }
+
+  console.log('Creating chunks from text of length:', text.length);
+  const chunks = [];
+  let start = 0;
+  
+  while (start < text.length) {
+    let end = start + CHUNK_SIZE;
+    if (end >= text.length) {
+      chunks.push(text.slice(start));
+      break;
+    }
     
-    // Check for existing chunks
-    const { Items: existingChunks } = await dynamoClient.query({
+    const periodIndex = text.indexOf('.', end - CHUNK_OVERLAP);
+    const newlineIndex = text.indexOf('\n', end - CHUNK_OVERLAP);
+    const spaceIndex = text.indexOf(' ', end - CHUNK_OVERLAP);
+    
+    let breakPoint = end;
+    if (periodIndex !== -1 && periodIndex < end + CHUNK_OVERLAP) {
+      breakPoint = periodIndex + 1;
+    } else if (newlineIndex !== -1 && newlineIndex < end + CHUNK_OVERLAP) {
+      breakPoint = newlineIndex + 1;
+    } else if (spaceIndex !== -1 && spaceIndex < end + CHUNK_OVERLAP) {
+      breakPoint = spaceIndex + 1;
+    }
+    
+    const chunk = text.slice(start, breakPoint).trim();
+    if (chunk.length >= 50) {
+      chunks.push(chunk);
+    }
+    start = breakPoint - CHUNK_OVERLAP;
+  }
+  
+  const validChunks = chunks.filter(chunk => {
+    const words = chunk.split(/\s+/).filter(word => word.length > 0);
+    return words.length >= 5;
+  });
+
+  if (validChunks.length === 0 && text.length > 0) {
+    console.log('Warning: No valid chunks created from non-empty text');
+    console.log('Text sample:', text.slice(0, 200));
+  }
+
+  return validChunks;
+};
+
+async function processAndStoreDocument(url, agentName) {
+  try {
+    console.log('Starting document processing for URL:', url);
+    console.log('Agent Name:', agentName);
+    
+    if (!agentName) {
+      throw new Error('Agent name is required');
+    }
+
+    const docId = Buffer.from(url).toString('base64');
+    const fileName = url.split('/').pop();
+    
+    console.log('Downloading PDF...');
+    const pdfData = await downloadPDFFromS3(url);
+    
+    console.log('Extracting text from PDF...');
+    const rawText = await extractTextFromPDF(pdfData);
+    console.log(`Raw text extracted, length: ${rawText.length}`);
+    
+    const cleanedText = cleanText(rawText);
+    console.log(`Text cleaned, final length: ${cleanedText.length}`);
+    
+    if (cleanedText.length === 0) {
+      throw new Error('No text content could be extracted from the PDF');
+    }
+    
+    console.log('Generating document summary...');
+    const summary = await generateDocumentSummary(cleanedText.slice(0, 4000));
+    console.log('Summary generated:', summary);
+    
+    console.log('Creating text chunks...');
+    const chunks = createChunks(cleanedText);
+    console.log(`Created ${chunks.length} chunks`);
+    
+    if (chunks.length === 0) {
+      throw new Error('No valid chunks could be created from the PDF text');
+    }
+    
+    let successfulChunks = 0;
+    const failedChunks = [];
+    
+    // Delete existing chunks for this document if any
+    const deleteParams = {
       TableName: CHUNKS_TABLE,
       KeyConditionExpression: 'docId = :docId',
       ExpressionAttributeValues: {
         ':docId': docId
       }
-    });
+    };
     
-    if (existingChunks && existingChunks.length > 0) {
-      console.log('Found existing chunks');
-      return {
-        chunks: existingChunks.map(c => c.text),
-        embeddings: existingChunks.map(c => c.embedding),
-        summary: existingChunks[0].metadata.summary,
-        fullText: existingChunks.map(c => c.text).join(' ')
-      };
+    const existingChunks = await dynamoClient.query(deleteParams);
+    if (existingChunks.Items && existingChunks.Items.length > 0) {
+      console.log(`Deleting ${existingChunks.Items.length} existing chunks for document`);
+      for (const chunk of existingChunks.Items) {
+        await dynamoClient.delete({
+          TableName: CHUNKS_TABLE,
+          Key: {
+            docId: chunk.docId,
+            chunkId: chunk.chunkId
+          }
+        });
+      }
     }
-
-    // Download and parse PDF
-    const pdfBuffer = await downloadPDFFromS3(url);
-    console.log('PDF downloaded successfully');
-
-    const pdfData = await pdfParse(pdfBuffer);
-    const cleanedText = cleanText(pdfData.text);
-    console.log(`PDF parsed and cleaned, text length: ${cleanedText.length}`);
     
-    // Generate document summary first
-    console.log('Generating document summary...');
-    const summary = await generateDocumentSummary(cleanedText);
-    console.log('Summary generated:', summary);
-    
-    // Split into chunks
-    const chunks = createChunks(cleanedText);
-    console.log(`Split into ${chunks.length} chunks`);
-    
-    // Process chunks in batches
-    const processedChunks = [];
-    for (let i = 0; i < chunks.length; i += BATCH_SIZE) {
-      const batch = chunks.slice(i, i + BATCH_SIZE);
-      console.log(`Processing batch ${i/BATCH_SIZE + 1}/${Math.ceil(chunks.length/BATCH_SIZE)}`);
-      
-      // Generate embeddings for batch
-      const batchEmbeddings = await Promise.all(
-        batch.map(chunk => getEmbeddings(chunk))
-      );
-      
-      // Store chunks with embeddings
-      await Promise.all(batch.map((chunk, index) => {
-        const chunkId = `${docId}_${i + index}`;
-        return dynamoClient.put({
+    // Process and store new chunks
+    for (let i = 0; i < chunks.length; i++) {
+      try {
+        console.log(`Processing chunk ${i + 1}/${chunks.length}`);
+        const chunk = chunks[i];
+        
+        console.log(`Generating embedding for chunk ${i + 1}...`);
+        const embedding = await getEmbeddings(chunk);
+        
+        const chunkId = `${docId}_${i}`;
+        const metadata = {
+          fileName,
+          position: i,
+          sourceUrl: url,
+          agentName,
+          ...(i === 0 && summary && { summary })
+        };
+        
+        await dynamoClient.put({
           TableName: CHUNKS_TABLE,
           Item: {
             docId,
             chunkId,
             text: chunk,
-            embedding: batchEmbeddings[index],
-            metadata: {
-              position: i + index,
-              charLength: chunk.length,
-              tokenEstimate: chunk.split(/\s+/).length,
-              sourceUrl: url,
-              contextId: contextId, // Store contextId if provided (for training docs)
-              summary: i === 0 ? summary : undefined // Store summary with first chunk
-            }
+            embedding,
+            metadata,
+            agentName // Add at root level for querying
           }
         });
-      }));
-      
-      processedChunks.push(...batch.map((chunk, index) => ({
-        text: chunk,
-        embedding: batchEmbeddings[index]
-      })));
-      
-      // Small delay between batches to avoid rate limits
-      if (i + BATCH_SIZE < chunks.length) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        console.log(`Chunk ${i + 1} stored successfully`);
+        successfulChunks++;
+      } catch (chunkError) {
+        console.error(`Error processing chunk ${i}:`, chunkError);
+        failedChunks.push(i);
       }
     }
     
-    console.log('All chunks processed and stored');
-    return {
-      chunks: processedChunks.map(c => c.text),
-      embeddings: processedChunks.map(c => c.embedding),
-      summary,
-      fullText: cleanedText
-    };
-  } catch (error) {
-    console.error('Error processing document:', error.stack);
-    throw error;
-  }
-}
-
-async function findRelevantContext(query, url) {
-  console.log(`Finding relevant context for query: "${query}"`);
-  try {
-    const { chunks, embeddings, summary } = await processAndStoreDocument(url);
-    
-    // For document overview queries, return the summary
-    const overviewKeywords = ['tell me about', 'what is', 'summarize', 'overview', 'summary'];
-    if (overviewKeywords.some(keyword => query.toLowerCase().includes(keyword))) {
-      return { context: summary, isOverview: true, summary };
+    if (successfulChunks === 0) {
+      throw new Error('Failed to process any chunks successfully');
     }
     
-    console.log('Document processed, generating query embedding');
-    const queryEmbedding = await getEmbeddings(query);
-    console.log('Query embedding generated, calculating similarities');
-    
-    // Calculate similarities and get top 3 most relevant chunks
-    const similarities = embeddings.map(embedding => cosineSimilarity(queryEmbedding, embedding));
-    const topIndices = similarities
-      .map((similarity, index) => ({ similarity, index }))
-      .sort((a, b) => b.similarity - a.similarity)
-      .slice(0, 3)
-      .map(item => item.index);
-    
-    console.log(`Found top ${topIndices.length} relevant chunks`);
-    const relevantContext = topIndices.map(index => chunks[index]).join('\n\n');
-    return { context: relevantContext, isOverview: false, summary };
+    return {
+      fileName,
+      summary,
+      docId,
+      totalChunks: chunks.length,
+      successfulChunks,
+      failedChunks: failedChunks.length
+    };
   } catch (error) {
-    console.error('Error finding relevant context:', error.stack);
+    console.error('Error in processAndStoreDocument:', error);
     throw error;
   }
 }
 
-async function getStoredChunks(contextId) {
+async function findRelevantContext(query, agentName) {
   try {
+    console.log('Finding relevant context for query:', query);
+    console.log('Agent Name:', agentName);
+    
+    if (!agentName) {
+      throw new Error('Agent name is required');
+    }
+
+    // Query chunks for this agent
     const { Items: chunks } = await dynamoClient.query({
       TableName: CHUNKS_TABLE,
-      IndexName: 'contextId-index',
-      KeyConditionExpression: 'contextId = :contextId',
+      IndexName: 'AgentIndex', // Assuming we create a GSI on agentName
+      KeyConditionExpression: 'agentName = :agentName',
       ExpressionAttributeValues: {
-        ':contextId': contextId
+        ':agentName': agentName
       }
     });
     
-    if (chunks && chunks.length > 0) {
-      return chunks.map(chunk => ({
-        text: chunk.text,
-        embedding: chunk.embedding
-      }));
+    if (!chunks || chunks.length === 0) {
+      console.log('No chunks found for agent:', agentName);
+      throw new Error(`No document chunks found for agent: ${agentName}`);
     }
-    return [];
+    
+    console.log(`Found ${chunks.length} chunks for agent ${agentName}, generating query embedding...`);
+    const queryEmbedding = await getEmbeddings(query);
+    console.log('Query embedding generated, calculating similarities...');
+    
+    // Calculate similarities
+    const similarities = [];
+    for (const chunk of chunks) {
+      if (!Array.isArray(chunk.embedding) || 
+          chunk.embedding.length !== queryEmbedding.length ||
+          !chunk.text || 
+          typeof chunk.text !== 'string') {
+        continue;
+      }
+      
+      const dotProduct = queryEmbedding.reduce((sum, val, i) => sum + val * chunk.embedding[i], 0);
+      const norm1 = Math.sqrt(queryEmbedding.reduce((sum, val) => sum + val * val, 0));
+      const norm2 = Math.sqrt(chunk.embedding.reduce((sum, val) => sum + val * val, 0));
+      const similarity = dotProduct / (norm1 * norm2);
+      
+      similarities.push({ chunk, similarity });
+    }
+    
+    if (similarities.length === 0) {
+      throw new Error('No valid chunks found for similarity calculation');
+    }
+    
+    // Get top N most relevant chunks
+    const topChunks = similarities
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, MAX_CHUNKS_PER_QUERY)
+      .map(item => item.chunk);
+    
+    console.log(`Selected top ${topChunks.length} chunks`);
+    
+    // Group chunks by document
+    const chunksByDoc = topChunks.reduce((acc, chunk) => {
+      const docId = chunk.docId;
+      if (!acc[docId]) {
+        acc[docId] = [];
+      }
+      acc[docId].push(chunk);
+      return acc;
+    }, {});
+    
+    // Assemble context with document attribution
+    const contextParts = [];
+    for (const chunks of Object.values(chunksByDoc)) {
+      const fileName = chunks[0].metadata?.fileName || 'Unknown Document';
+      const docContext = chunks
+        .map(chunk => chunk.text.trim())
+        .filter(text => text.length > 0)
+        .join('\n\n');
+      contextParts.push(`From document "${fileName}":\n\n${docContext}`);
+    }
+    
+    const context = contextParts.join('\n\n---\n\n');
+    console.log(`Assembled context with length: ${context.length}`);
+    console.log('Context preview:', context.slice(0, 200) + '...');
+    
+    // Get summaries of all referenced documents
+    const summaries = [...new Set(topChunks
+      .map(chunk => chunk.metadata?.summary)
+      .filter(Boolean))];
+    
+    return {
+      context,
+      summaries,
+      documentCount: Object.keys(chunksByDoc).length,
+      fileNames: [...new Set(topChunks.map(chunk => chunk.metadata?.fileName))]
+    };
   } catch (error) {
-    console.error('Error getting stored chunks:', error);
+    console.error('Error in findRelevantContext:', error);
     throw error;
   }
 }
 
 module.exports = {
   processAndStoreDocument,
-  findRelevantContext,
-  getStoredChunks
+  findRelevantContext
 };

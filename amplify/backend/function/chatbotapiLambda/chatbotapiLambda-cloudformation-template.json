@@ -78,7 +78,8 @@
             },
             "CHUNKS_TABLE": {
               "Ref": "ChunksTable"
-            }
+            },
+            "S3_BUCKET": "ai-testing-jw"
           }
         },
         "Role": {
@@ -89,7 +90,8 @@
         },
         "Runtime": "nodejs18.x",
         "Layers": [],
-        "Timeout": 25
+        "Timeout": 300,
+        "MemorySize": 2048
       }
     },
     "LambdaExecutionRole": {
@@ -214,20 +216,23 @@
                 "s3:GetObject",
                 "s3:DeleteObject"
               ],
-              "Resource": {
-                "Fn::Join": [
-                  "",
-                  [
-                    {
-                      "Fn::GetAtt": [
-                        "TrainingBucket",
-                        "Arn"
-                      ]
-                    },
-                    "/*"
+              "Resource": [
+                {
+                  "Fn::Join": [
+                    "",
+                    [
+                      {
+                        "Fn::GetAtt": [
+                          "TrainingBucket",
+                          "Arn"
+                        ]
+                      },
+                      "/*"
+                    ]
                   ]
-                ]
-              }
+                },
+                "arn:aws:s3:::ai-testing-jw/*"
+              ]
             },
             {
               "Effect": "Allow",
@@ -307,6 +312,10 @@
           {
             "AttributeName": "contextId",
             "AttributeType": "S"
+          },
+          {
+            "AttributeName": "agentName",
+            "AttributeType": "S"
           }
         ],
         "KeySchema": [
@@ -325,6 +334,18 @@
             "KeySchema": [
               {
                 "AttributeName": "contextId",
+                "KeyType": "HASH"
+              }
+            ],
+            "Projection": {
+              "ProjectionType": "ALL"
+            }
+          },
+          {
+            "IndexName": "AgentIndex",
+            "KeySchema": [
+              {
+                "AttributeName": "agentName",
                 "KeyType": "HASH"
               }
             ],

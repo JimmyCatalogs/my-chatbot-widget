@@ -2,137 +2,176 @@ const express = require('express');
 const router = express.Router();
 const { InvokeModelCommand } = require("@aws-sdk/client-bedrock-runtime");
 const { bedrockClient } = require('../config/aws-clients');
-const { processAndStoreDocument, findRelevantContext } = require('../services/document-service');
+const { findRelevantContext } = require('../services/document-service');
+
+const CLAUDE_MODEL = "anthropic.claude-3-5-sonnet-20240620-v1:0";
+
+// Collect logs
+const logs = [];
+const log = (message) => {
+  const timestamp = new Date().toISOString();
+  const logMessage = `[${timestamp}] ${message}`;
+  logs.push(logMessage);
+  console.log(logMessage);
+};
+
+// Clear logs between requests
+const clearLogs = () => {
+  logs.length = 0;
+};
 
 router.get("/test", (req, res) => {
+  clearLogs();
+  log('Health check endpoint called');
   res.json({
     status: "ok",
     time: new Date().toISOString(),
     region: process.env.AWS_REGION,
+    logs
   });
 });
 
-router.post("/chat", async (req, res) => {
-  console.log("Chat request received:", req.body);
+router.post("/", async (req, res) => {
+  clearLogs();
+  log("Chat request received");
+  const progress = [];
+  
   try {
-    const { message, profileId, agentId, documentUrl } = req.body;
+    const { message, agentName, agentId = 'claude-default' } = req.body;
+    log(`Request params: message="${message}", agentName="${agentName || 'none'}", agentId="${agentId}"`);
 
     // Validate required fields
-    if (!message || !profileId || !agentId) {
+    if (!message || !agentName) {
+      log('Missing required fields in request');
       return res.status(400).json({ 
         error: "Missing required fields",
-        received: { message, profileId, agentId }
+        received: { message, agentName },
+        logs
       });
     }
 
     // Validate agentId
     if (agentId !== 'claude-default') {
+      log('Invalid agent ID provided');
       return res.status(400).json({ 
         error: "Invalid agent ID",
-        validAgents: ['claude-default']
+        validAgents: ['claude-default'],
+        logs
       });
     }
 
-    console.log("Processing chat request with message:", message);
     let contextInfo = null;
-    let isDocumentMode = false;
 
-    if (documentUrl) {
-      console.log('Document URL provided, fetching relevant context');
-      try {
-        contextInfo = await findRelevantContext(message, documentUrl);
-        console.log('Successfully retrieved context');
-        isDocumentMode = true;
-      } catch (error) {
-        console.error('Error getting relevant context:', error.stack);
-        if (error.message.includes('exceeds limit')) {
-          return res.status(400).json({
-            error: 'Document too large',
-            details: error.message
-          });
-        }
-        return res.status(500).json({ 
-          error: 'Failed to process document context',
-          details: error.message
-        });
+    try {
+      progress.push("Finding relevant context...");
+      log('Finding relevant context for agent...');
+      log(`Agent Name: ${agentName}`);
+      
+      contextInfo = await findRelevantContext(message, agentName);
+      progress.push("Context found");
+      log(`Found relevant context from ${contextInfo.documentCount} documents`);
+      log(`Context length: ${contextInfo.context.length} characters`);
+      log(`Context preview: ${contextInfo.context.slice(0, 200)}...`);
+      
+      if (!contextInfo.context || contextInfo.context.length === 0) {
+        log('Warning: Empty context returned');
+        throw new Error('No relevant context found for this agent');
       }
+    } catch (error) {
+      log(`Error finding context: ${error.message}`);
+      return res.status(500).json({
+        error: 'Failed to find relevant context',
+        details: error.message,
+        progress,
+        logs
+      });
     }
 
-    const systemPrompt = isDocumentMode 
-      ? `You are a helpful AI assistant that answers questions based on the provided document. The document's summary is: ${contextInfo.summary}\n\nWhen answering questions, reference specific information from the provided context. If the context doesn't contain relevant information to answer the question, say so clearly.`
-      : "You are a helpful AI assistant.";
+    // Prepare chat completion request
+    progress.push("Generating response...");
+    log('Preparing chat completion request');
 
-    const userMessage = isDocumentMode
-      ? contextInfo.isOverview
-        ? `Here is a summary of the document:\n\n${contextInfo.context}\n\nPlease provide an overview based on this summary.`
-        : `Here is the relevant context from the document:\n\n${contextInfo.context}\n\nBased on this context, please answer the following question: ${message}`
-      : message;
+    const messages = [
+      { 
+        role: "user", 
+        content: `You are ${agentName}, a knowledgeable assistant. Provide concise, focused responses that highlight the most relevant information. Keep your initial response brief (2-3 key points) and end by offering to provide more specific details if the user would like to know more about any particular aspect. Your tone should be natural and confident while staying accurate to the provided context.`
+      },
+      {
+        role: "assistant",
+        content: `I understand. I'll provide brief, focused responses and offer to expand on specific topics if needed.`
+      },
+      { 
+        role: "user", 
+        content: `Here's some relevant information:\n\n${contextInfo.context}\n\n${message}`
+      }
+    ];
+    log('Prepared messages with document context');
 
+    // Get response from Claude
+    log('Sending request to Claude');
     const command = new InvokeModelCommand({
-      modelId: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+      modelId: CLAUDE_MODEL,
       contentType: "application/json",
       accept: "application/json",
       body: JSON.stringify({
         anthropic_version: "bedrock-2023-05-31",
-        max_tokens: 2048,
-        messages: [
-          {
-            role: "user",
-            content: systemPrompt
-          },
-          { 
-            role: "user", 
-            content: userMessage 
-          }
-        ],
+        max_tokens: 1024,
+        messages: messages,
         temperature: 0.7,
       }),
     });
 
-    console.log("Sending command to Bedrock");
     const response = await bedrockClient.send(command);
-    console.log("Received response from Bedrock");
-
-    const responseBody = new TextDecoder().decode(response.body);
-    console.log("Response body:", responseBody);
-
-    const parsedResponse = JSON.parse(responseBody);
+    const responseBody = JSON.parse(Buffer.from(response.body).toString());
+    progress.push("Response generated");
+    log('Received response from Claude');
     
-    // Add prefix to response in document mode
-    const responseText = isDocumentMode
-      ? (contextInfo.isOverview ? "Document Overview: " : "Based on the document context: ") + parsedResponse.content[0].text
-      : parsedResponse.content[0].text;
+    // Send the response directly without prepending the agent name
+    const responseText = responseBody.content[0].text;
 
+    log('Sending response to client');
+    log(`Response preview: ${responseText.slice(0, 200)}...`);
+    
     res.json({ 
       message: responseText,
       agentId: agentId,
+      agentName: agentName,
       timestamp: new Date().toISOString(),
-      isDocumentMode: isDocumentMode
+      progress,
+      logs
     });
 
   } catch (error) {
-    console.error("Error processing chat request:", error.stack);
+    log(`Error processing chat request: ${error.message}`);
     
     if (error.name === 'ValidationException') {
       res.status(400).json({
         error: "Invalid request",
-        details: error.message
+        details: error.message,
+        progress,
+        logs
       });
     } else if (error.name === 'ResourceNotFoundException') {
       res.status(404).json({
         error: "Model not found",
-        details: error.message
+        details: error.message,
+        progress,
+        logs
       });
     } else if (error.name === 'AccessDeniedException') {
       res.status(403).json({
         error: "Access denied to Bedrock",
-        details: "Please check IAM permissions"
+        details: "Please check IAM permissions",
+        progress,
+        logs
       });
     } else {
       res.status(500).json({
         error: "Internal server error",
         details: error.message,
-        type: error.name
+        type: error.name,
+        progress,
+        logs
       });
     }
   }

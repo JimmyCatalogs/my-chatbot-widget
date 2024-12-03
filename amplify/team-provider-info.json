@@ -15,7 +15,7 @@
       "function": {
         "chatbotapiLambda": {
           "deploymentBucketName": "amplify-chatbotwidget2-dev-adf04-deployment",
-          "s3Key": "amplify-builds/chatbotapiLambda-38716673775752715471-build.zip"
+          "s3Key": "amplify-builds/chatbotapiLambda-44456341442b6e776934-build.zip"
         },
         "S3Trigger4cf879ad": {
           "deploymentBucketName": "amplify-chatbotwidget2-dev-adf04-deployment",

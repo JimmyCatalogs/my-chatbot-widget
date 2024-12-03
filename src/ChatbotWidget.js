@@ -1,71 +1,194 @@
-// ChatbotWidget.js
 class ChatbotWidget extends HTMLElement {
   constructor() {
     super();
-    this.shadow = this.attachShadow({ mode: 'open' });
+    this.attachShadow({ mode: 'open' });
     this.messages = [];
     this.isOpen = false;
-    this.API_URL = 'https://twprrdsgsk.execute-api.us-east-1.amazonaws.com/dev';
     
-    // Get attributes or use defaults
-    this.profileId = this.getAttribute('profile-id') || 'default';
-    this.agentId = this.getAttribute('agent-id') || 'claude-default';  // Using consistent agent ID
-    this.documentUrl = this.getAttribute('document-url') || '';
+    this.API_URL = window.location.hostname === 'localhost'
+      ? 'http://localhost:3001'
+      : 'https://twprrdsgsk.execute-api.us-east-1.amazonaws.com/dev';
+    
+    this.aiModel = this.getAttribute('ai-model') || 'claude-default';
+    this.agentName = this.getAttribute('agent-name') || '';
+    this.documentCount = parseInt(this.getAttribute('document-count')) || 0;
     this.theme = {
       primaryColor: this.getAttribute('primary-color') || '#3B82F6',
       fontFamily: this.getAttribute('font-family') || 'system-ui, -apple-system, sans-serif'
     };
 
-    // Get positioning
     this.bottom = this.getAttribute('bottom') || '20px';
     this.right = this.getAttribute('right') || '20px';
+
+    // Initialize after all properties are set
+    this.initialize();
   }
 
-  static get observedAttributes() {
-    return ['document-url'];
+  initialize() {
+    this.render();
+    this.setupEventListeners();
+    if (this.agentName) {
+      this.showWelcomeMessage();
+    }
+    this.debugLog('ChatbotWidget initialized with API URL: ' + this.API_URL);
   }
 
-  attributeChangedCallback(name, oldValue, newValue) {
-    if (name === 'document-url' && oldValue !== newValue) {
-      this.documentUrl = newValue;
-      this.resetChat();
-      if (this.documentUrl) {
-        const filename = this.getFilenameFromUrl(this.documentUrl);
-        this.addMessage({
-          role: 'assistant',
-          content: `Document loaded: "${filename}"\nYou can ask me questions about it. Try saying "Tell me about the document" for an overview, or ask specific questions about its content.`,
-          isDocumentMode: true
+  debugLog(message) {
+    if (window.logDebug) {
+      window.logDebug(message);
+    } else {
+      console.log('[ChatbotWidget]', message);
+    }
+  }
+
+  isBase64(str) {
+    try {
+      return btoa(atob(str)) === str;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async parseResponseData(response) {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      if (this.isBase64(text)) {
+        try {
+          const decoded = atob(text);
+          return JSON.parse(decoded);
+        } catch (e2) {
+          throw new Error('Failed to parse response data');
+        }
+      }
+      throw e;
+    }
+  }
+
+  logBackendLogs(logs) {
+    if (Array.isArray(logs)) {
+      if (window.logBackendLogs) {
+        window.logBackendLogs(logs);
+      } else {
+        logs.forEach(log => {
+          console.log('[ChatbotWidget Backend]', log);
         });
       }
     }
   }
 
-  getFilenameFromUrl(url) {
-    const urlParts = url.split('/');
-    return decodeURIComponent(urlParts[urlParts.length - 1]);
+  showWelcomeMessage() {
+    if (this.agentName) {
+      this.addMessage({
+        role: 'assistant',
+        content: 'Hello! How can I help you today?'
+      });
+    }
+  }
+
+  async sendMessage(content) {
+    this.addMessage({ role: 'user', content });
+    this.setTypingIndicator(true);
+    this.clearError();
+
+    try {
+      const payload = {
+        message: content,
+        agentName: this.agentName,
+        agentId: this.aiModel
+      };
+
+      this.debugLog('Sending message to backend...');
+      this.debugLog(`Using AI model: ${this.aiModel}, agentName: ${this.agentName}`);
+
+      const response = await fetch(`${this.API_URL}/api/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await this.parseResponseData(response);
+
+      if (!response.ok) {
+        throw new Error(data.error || data.details || 'Failed to get response');
+      }
+
+      if (data.logs) {
+        this.logBackendLogs(data.logs);
+      }
+
+      if (data.progress) {
+        data.progress.forEach(message => {
+          this.debugLog(message);
+        });
+      }
+
+      if (data.message) {
+        this.addMessage({ 
+          role: 'assistant', 
+          content: data.message
+        });
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      this.debugLog(`Error: ${error.message}`);
+      this.showError(error.message || 'An unexpected error occurred');
+    } finally {
+      this.setTypingIndicator(false);
+    }
+  }
+
+  static get observedAttributes() {
+    return ['agent-name', 'ai-model', 'document-count'];
+  }
+
+  attributeChangedCallback(name, oldValue, newValue) {
+    if (oldValue === newValue) return;
+
+    const wasOpen = this.isOpen;
+    
+    if (name === 'agent-name') {
+      this.agentName = newValue;
+      this.resetChat();
+      this.render();
+      this.setupEventListeners();
+      if (this.agentName) {
+        this.showWelcomeMessage();
+      }
+    } else if (name === 'ai-model') {
+      this.aiModel = newValue || 'claude-default';
+      this.debugLog(`AI model updated to: ${this.aiModel}`);
+    } else if (name === 'document-count') {
+      this.documentCount = parseInt(newValue) || 0;
+      this.render();
+      this.setupEventListeners();
+    }
+
+    // Restore chat window state if it was open
+    if (wasOpen) {
+      const chatWindow = this.shadowRoot.querySelector('.chat-window');
+      const toggleButton = this.shadowRoot.querySelector('.toggle-button');
+      if (chatWindow && toggleButton) {
+        this.isOpen = true;
+        chatWindow.classList.add('open');
+        toggleButton.innerHTML = '&times;';
+      }
+    }
   }
 
   resetChat() {
     this.messages = [];
-    const messagesContainer = this.shadow.querySelector('.chat-messages');
+    const messagesContainer = this.shadowRoot.querySelector('.chat-messages');
     if (messagesContainer) {
       messagesContainer.innerHTML = '';
     }
   }
 
-  connectedCallback() {
-    this.render();
-    this.setupEventListeners();
-    
-    // If document URL is provided, show welcome message
-    if (this.documentUrl) {
-      const filename = this.getFilenameFromUrl(this.documentUrl);
-      this.addMessage({
-        role: 'assistant',
-        content: `Document loaded: "${filename}"\nYou can ask me questions about it. Try saying "Tell me about the document" for an overview, or ask specific questions about its content.`,
-        isDocumentMode: true
-      });
-    }
+  adjustColor(color, amount) {
+    return color; // Simplified version for now
   }
 
   render() {
@@ -96,7 +219,7 @@ class ChatbotWidget extends HTMLElement {
       }
 
       .toggle-button:hover {
-        background: ${this.adjustColor(this.theme.primaryColor, -20)};
+        background: ${this.theme.primaryColor};
       }
 
       .chat-window {
@@ -108,10 +231,9 @@ class ChatbotWidget extends HTMLElement {
         background: white;
         border-radius: 10px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        display: flex;
+        display: none;
         flex-direction: column;
         overflow: hidden;
-        display: none;
       }
 
       .chat-window.open {
@@ -125,6 +247,7 @@ class ChatbotWidget extends HTMLElement {
         display: flex;
         align-items: center;
         gap: 8px;
+        position: relative;
       }
 
       .chat-header h3 {
@@ -133,8 +256,8 @@ class ChatbotWidget extends HTMLElement {
         color: #1f2937;
       }
 
-      .document-indicator {
-        display: ${this.documentUrl ? 'inline-flex' : 'none'};
+      .agent-indicator {
+        display: ${this.agentName ? 'inline-flex' : 'none'};
         align-items: center;
         padding: 4px 10px;
         background: ${this.theme.primaryColor}20;
@@ -144,12 +267,49 @@ class ChatbotWidget extends HTMLElement {
         white-space: nowrap;
         gap: 4px;
         margin-left: 8px;
-        order: -1;
+        cursor: pointer;
+        transition: background-color 0.2s;
+        position: relative;
       }
 
-      .document-indicator svg {
+      .agent-indicator:hover {
+        background: ${this.theme.primaryColor}30;
+      }
+
+      .agent-indicator svg {
         width: 14px;
         height: 14px;
+      }
+
+      .agent-popup {
+        position: absolute;
+        top: calc(100% + 5px);
+        left: 50%;
+        transform: translateX(-50%);
+        background: white;
+        padding: 8px 12px;
+        border-radius: 6px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+        font-size: 12px;
+        color: #1f2937;
+        display: none;
+        white-space: nowrap;
+        z-index: 2;
+      }
+
+      .agent-popup::before {
+        content: '';
+        position: absolute;
+        top: -4px;
+        left: 50%;
+        transform: translateX(-50%) rotate(45deg);
+        width: 8px;
+        height: 8px;
+        background: white;
+      }
+
+      .agent-popup.visible {
+        display: block;
       }
 
       .chat-messages {
@@ -190,12 +350,6 @@ class ChatbotWidget extends HTMLElement {
         color: #1f2937;
       }
 
-      .assistant-message.document-response .message-content {
-        background: ${this.theme.primaryColor}15;
-        border-left: 3px solid ${this.theme.primaryColor};
-        border-radius: 0 15px 15px 0;
-      }
-
       .input-container {
         padding: 15px;
         border-top: 1px solid #eee;
@@ -229,7 +383,7 @@ class ChatbotWidget extends HTMLElement {
       }
 
       .send-button:hover {
-        background: ${this.adjustColor(this.theme.primaryColor, -20)};
+        background: ${this.theme.primaryColor};
       }
 
       .send-button:disabled {
@@ -262,35 +416,52 @@ class ChatbotWidget extends HTMLElement {
       }
     `;
 
-    const documentSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>`;
+    const robotSvg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>`;
 
-    this.shadow.innerHTML = `
-      <div class="widget-container">
-        <button class="toggle-button">&#128172;</button>
-        <div class="chat-window">
-          <div class="chat-header">
-            <span class="document-indicator">${documentSvg} Document Ready</span>
-            <h3>Chat Assistant</h3>
+    const container = document.createElement('div');
+    container.className = 'widget-container';
+    container.innerHTML = `
+      <button class="toggle-button">&#128172;</button>
+      <div class="chat-window">
+        <div class="chat-header">
+          <h3>Chat Assistant</h3>
+          <div class="agent-indicator">${robotSvg} ${this.agentName || 'No Agent'}
+            <div class="agent-popup">
+              ${this.documentCount} document${this.documentCount !== 1 ? 's' : ''} loaded for context
+            </div>
           </div>
-          <div class="chat-messages"></div>
-          <div class="typing-indicator">Typing...</div>
-          <div class="error-message"></div>
-          <form class="input-container">
-            <input type="text" class="message-input" placeholder="${this.documentUrl ? 'Ask about the document or type any question...' : 'Type your message...'}">
-            <button type="submit" class="send-button">Send</button>
-          </form>
         </div>
+        <div class="chat-messages"></div>
+        <div class="typing-indicator">Typing...</div>
+        <div class="error-message"></div>
+        <form class="input-container">
+          <input type="text" class="message-input" placeholder="Type your message...">
+          <button type="submit" class="send-button">Send</button>
+        </form>
       </div>
     `;
 
-    this.shadow.appendChild(style);
+    this.shadowRoot.innerHTML = '';
+    this.shadowRoot.appendChild(style);
+    this.shadowRoot.appendChild(container);
+
+    // Restore messages after re-render
+    this.messages.forEach(message => {
+      const messagesContainer = this.shadowRoot.querySelector('.chat-messages');
+      const messageElement = document.createElement('div');
+      messageElement.className = `message ${message.role}-message`;
+      messageElement.innerHTML = `<div class="message-content">${message.content}</div>`;
+      messagesContainer.appendChild(messageElement);
+    });
   }
 
   setupEventListeners() {
-    const toggleButton = this.shadow.querySelector('.toggle-button');
-    const chatWindow = this.shadow.querySelector('.chat-window');
-    const form = this.shadow.querySelector('form');
-    const input = this.shadow.querySelector('.message-input');
+    const toggleButton = this.shadowRoot.querySelector('.toggle-button');
+    const chatWindow = this.shadowRoot.querySelector('.chat-window');
+    const form = this.shadowRoot.querySelector('form');
+    const input = this.shadowRoot.querySelector('.message-input');
+    const agentIndicator = this.shadowRoot.querySelector('.agent-indicator');
+    const agentPopup = this.shadowRoot.querySelector('.agent-popup');
 
     toggleButton.addEventListener('click', () => {
       this.isOpen = !this.isOpen;
@@ -306,93 +477,68 @@ class ChatbotWidget extends HTMLElement {
       await this.sendMessage(message);
       input.value = '';
     });
-  }
 
-  async sendMessage(content) {
-    this.addMessage({ role: 'user', content });
-    this.setTypingIndicator(true);
-    this.clearError();
+    // Toggle popup on agent indicator click
+    agentIndicator.addEventListener('click', (e) => {
+      e.stopPropagation();
+      agentPopup.classList.toggle('visible');
+    });
 
-    try {
-      const payload = {
-        message: content,
-        profileId: this.profileId,
-        agentId: this.agentId
-      };
-
-      // Only include documentUrl if it exists
-      if (this.documentUrl) {
-        payload.documentUrl = this.documentUrl;
+    // Close popup when clicking anywhere in the chat window
+    chatWindow.addEventListener('click', (e) => {
+      if (!agentIndicator.contains(e.target)) {
+        agentPopup.classList.remove('visible');
       }
-
-      const response = await fetch(`${this.API_URL}/api/chat`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload)
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to get response');
-      }
-
-      const data = await response.json();
-      this.addMessage({ 
-        role: 'assistant', 
-        content: data.message,
-        isDocumentMode: data.isDocumentMode 
-      });
-    } catch (error) {
-      console.error('Error sending message:', error);
-      this.showError(error.message || 'An unexpected error occurred');
-    } finally {
-      this.setTypingIndicator(false);
-    }
+    });
   }
 
   addMessage(message) {
     this.messages.push(message);
-    const messagesContainer = this.shadow.querySelector('.chat-messages');
+    const messagesContainer = this.shadowRoot.querySelector('.chat-messages');
     const messageElement = document.createElement('div');
     messageElement.className = `message ${message.role}-message`;
-    if (message.isDocumentMode) {
-      messageElement.classList.add('document-response');
-    }
     messageElement.innerHTML = `<div class="message-content">${message.content}</div>`;
     messagesContainer.appendChild(messageElement);
     this.scrollToBottom();
   }
 
   scrollToBottom() {
-    const messagesContainer = this.shadow.querySelector('.chat-messages');
+    const messagesContainer = this.shadowRoot.querySelector('.chat-messages');
     messagesContainer.scrollTop = messagesContainer.scrollHeight;
   }
 
   setTypingIndicator(visible) {
-    const indicator = this.shadow.querySelector('.typing-indicator');
+    const indicator = this.shadowRoot.querySelector('.typing-indicator');
     indicator.classList.toggle('visible', visible);
   }
 
   showError(message) {
-    const errorElement = this.shadow.querySelector('.error-message');
+    const errorElement = this.shadowRoot.querySelector('.error-message');
     errorElement.textContent = message;
     errorElement.classList.add('visible');
   }
 
   clearError() {
-    const errorElement = this.shadow.querySelector('.error-message');
+    const errorElement = this.shadowRoot.querySelector('.error-message');
     errorElement.classList.remove('visible');
-  }
-
-  adjustColor(color, amount) {
-    const hex = color.replace('#', '');
-    const num = parseInt(hex, 16);
-    const r = Math.min(255, Math.max(0, (num >> 16) + amount));
-    const g = Math.min(255, Math.max(0, ((num >> 8) & 0x00FF) + amount));
-    const b = Math.min(255, Math.max(0, (num & 0x0000FF) + amount));
-    return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
   }
 }
 
-customElements.define('chatbot-widget', ChatbotWidget);
+// Only define the custom element if it hasn't been defined yet
+if (!customElements.get('chatbot-widget')) {
+  customElements.define('chatbot-widget', ChatbotWidget);
+}
+
+// Initialize widgets if we're in the admin interface
+window.addEventListener('load', () => {
+  const docWidget = document.getElementById('doc-widget');
+  const demoWidget = document.getElementById('demo-widget');
+  
+  if (docWidget && demoWidget && window.logDebug) {
+    window.logDebug('Agent-enabled widgets loaded');
+    window.logDebug(`Admin Widget AI Model: ${docWidget.getAttribute('ai-model')}`);
+    window.logDebug(`Demo Widget AI Model: ${demoWidget.getAttribute('ai-model')}`);
+    window.logDebug(`Position: bottom=${docWidget.getAttribute('bottom')}, right=${docWidget.getAttribute('right')}`);
+    window.logDebug(`API URL: ${docWidget.API_URL}`);
+  }
+});

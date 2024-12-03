@@ -1,0 +1,360 @@
+body {
+    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 800px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+/* Tab Styles */
+.tabs {
+    margin-bottom: 20px;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.tab-button {
+    padding: 10px 20px;
+    font-size: 16px;
+    border: none;
+    background: none;
+    cursor: pointer;
+    margin-right: 10px;
+    color: #6b7280;
+    position: relative;
+}
+
+.tab-button.active {
+    color: #4F46E5;
+    font-weight: 500;
+}
+
+.tab-button.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #4F46E5;
+}
+
+.tab-content {
+    display: none;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+/* Code Display */
+.code-block {
+    background: #1F2937;
+    color: #D1D5DB;
+    padding: 16px;
+    border-radius: 6px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    margin: 20px 0;
+    position: relative;
+    overflow-x: auto;
+    white-space: pre;
+}
+
+.code-block code {
+    display: block;
+    width: 100%;
+}
+
+.copy-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    background: #374151;
+    color: #D1D5DB;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    z-index: 1;
+}
+
+.copy-button:hover {
+    background: #4B5563;
+}
+
+/* Section Styles */
+.test-section {
+    margin-bottom: 40px;
+}
+
+.section-container {
+    border: 1px solid #e5e7eb;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+
+.section-title {
+    font-size: 1.2em;
+    font-weight: 600;
+    margin-bottom: 15px;
+    color: #1f2937;
+}
+
+.section-description {
+    color: #6b7280;
+    margin-bottom: 20px;
+    font-size: 0.95em;
+}
+
+/* Form Styles */
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 8px;
+    color: #374151;
+    font-weight: 500;
+}
+
+.new-agent-form {
+    display: none;
+    margin-top: 15px;
+    padding: 15px;
+    background: #f9fafb;
+    border-radius: 6px;
+}
+
+.new-agent-form.visible {
+    display: block;
+}
+
+.new-agent-form input {
+    width: 100%;
+    padding: 8px;
+    margin-bottom: 10px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+}
+
+/* Button Styles */
+.upload-button, .reprocess-button, .create-agent-button, .clear-db-button {
+    padding: 8px 16px;
+    background: #4F46E5;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+}
+
+.clear-db-button {
+    background: #DC2626;
+}
+
+.clear-db-button:hover {
+    background: #B91C1C;
+}
+
+.upload-button:hover, .reprocess-button:hover, .create-agent-button:hover {
+    background: #4338CA;
+}
+
+.upload-button:disabled, .reprocess-button:disabled {
+    background: #9CA3AF;
+    cursor: not-allowed;
+}
+
+/* Progress Bar */
+.progress-section {
+    margin-bottom: 20px;
+}
+
+.progress-bar {
+    height: 4px;
+    background: #e5e7eb;
+    border-radius: 2px;
+    overflow: hidden;
+    display: none;
+}
+
+.progress-bar.visible {
+    display: block;
+}
+
+.progress-fill {
+    height: 100%;
+    background: #4F46E5;
+    width: 0;
+    transition: width 0.3s ease;
+}
+
+/* Status Messages */
+.status-message {
+    margin-top: 8px;
+    font-size: 14px;
+    display: none;
+}
+
+.status-message.visible {
+    display: block;
+}
+
+.status-message.error {
+    color: #DC2626;
+}
+
+.status-message.success {
+    color: #059669;
+}
+
+/* Debug Console */
+#debug {
+    margin-top: 40px;
+    padding: 20px;
+    background: #1F2937;
+    border-radius: 8px;
+}
+
+#debug h3 {
+    color: white;
+    margin-top: 0;
+}
+
+#debug-output {
+    background: #111827;
+    color: #D1D5DB;
+    padding: 16px;
+    border-radius: 6px;
+    font-family: monospace;
+    font-size: 14px;
+    white-space: pre-wrap;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Demo Tab Specific Styles */
+.demo-header {
+    font-size: 2em;
+    color: #1f2937;
+    margin-bottom: 30px;
+}
+
+.instruction-step {
+    margin-bottom: 20px;
+    padding-left: 24px;
+    position: relative;
+}
+
+.instruction-step::before {
+    content: counter(step-counter);
+    counter-increment: step-counter;
+    position: absolute;
+    left: 0;
+    width: 20px;
+    height: 20px;
+    background: #4F46E5;
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.instructions {
+    counter-reset: step-counter;
+    margin-bottom: 30px;
+}
+
+.field-explanation {
+    margin: 10px 0;
+    padding-left: 20px;
+    border-left: 2px solid #4F46E5;
+}
+
+.field-name {
+    font-weight: 600;
+    color: #4F46E5;
+}
+
+/* Fixed position for demo chatbot */
+#demo-widget {
+    position: fixed !important;
+    bottom: 20px !important;
+    right: 20px !important;
+    z-index: 1000 !important;
+}
+
+/* Additional Utility Classes */
+.dropdown {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+    margin-bottom: 10px;
+}
+
+.agent-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.upload-section {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.file-input-wrapper {
+    flex: 1;
+}
+
+.file-input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #e5e7eb;
+    border-radius: 6px;
+}
+
+.document-controls {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.admin-controls {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid #e5e7eb;
+}
+
+.section-divider {
+    border-top: 1px solid #e5e7eb;
+    margin: 30px 0;
+}
+
+/* Demo Instructions */
+.demo-instructions {
+    background: #f8fafc;
+    border-left: 4px solid #4F46E5;
+    padding: 16px 20px;
+    margin: 20px 0;
+    border-radius: 0 8px 8px 0;
+}
+
+.demo-instructions p {
+    margin: 8px 0;
+    color: #1f2937;
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.demo-instructions strong {
+    color: #4F46E5;
+}
